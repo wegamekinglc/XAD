@@ -6,7 +6,7 @@ expressions to work, as well as specialising numeric_limits.
    This file is part of XAD, a comprehensive C++ library for
    automatic differentiation.
 
-   Copyright (C) 2010-2023 Xcelerit Computing Ltd.
+   Copyright (C) 2010-2024 Xcelerit Computing Ltd.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU Affero General Public License as published
@@ -156,6 +156,14 @@ struct is_arithmetic<xad::AReal<T>> : std::is_arithmetic<T>
 };
 template <class T>
 struct is_arithmetic<xad::FReal<T>> : std::is_arithmetic<T>
+{
+};
+template <class T>
+struct is_signed<xad::AReal<T>> : std::is_signed<T> 
+{
+};
+template <class T>
+struct is_signed<xad::FReal<T>> : std::is_signed<T>
 {
 };
 template <class T>
