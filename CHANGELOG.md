@@ -17,14 +17,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+
+## [1.5.2] - 2024-04-04
+
+This patch release is for matching versions with 
+[xad-py](https://github.com/auto-differentiation/xad-py).
+
+### Changed
+
+- Moved Python bindings into its [own repository](https://github.com/auto-differentiation/xad-py)
+  (new Python package name is [xad](https://pypi.org/project/xad))
+- Reorganised website
+- Upgraded CI/CD actions
+
 ## [1.5.1] - 2024-03-28
 
-This is a patch release to allow interoperability with the QuantLib-Risks 
+This is a patch release to allow interoperability with the QuantLib-Risks
 Python package.
 
 ### Added
 
--   added static functions to `Tape` to activate and deactivate a specific 
+-   added static functions to `Tape` to activate and deactivate a specific
     tape instance
 
 
@@ -38,7 +51,7 @@ Python package.
 
 ### Changed
 
--   Improved documentation for quantlib-xad build
+-   Improved documentation for QuantLib-Risks build
 -   Cleaned up output of Swap Pricer example
 
 ## [1.4.1] - 2024-01-10
@@ -83,12 +96,12 @@ This is a patch release to ensure compatibility with QuantLib 1.33.
 ### Added
 
 -   More CI/CD workflows for all supported compiler versions
--   Added math function `copysign` 
+-   Added math function `copysign`
 
 ### Changed
 
 -   Revamped documentation site using mkdocs
--   Improved tests and testing infrastructure 
+-   Improved tests and testing infrastructure
 
 ### Fixed
 
@@ -99,12 +112,12 @@ This is a patch release to ensure compatibility with QuantLib 1.33.
 
 ### Added
 
--   QuantLib integration by means of the 
-    [quantlib-xad](https://github.com/auto-differentiation/quantlib-xad) 
+-   QuantLib integration by means of the
+    [QuantLib-Risks](https://github.com/auto-differentiation/QuantLib-Risks-Cpp)
     integration module
 -   Full MacOS support
 -   Better CI pipeline with more platforms and compilers tested
--   Code coverage and quality measured on pull requests and reported 
+-   Code coverage and quality measured on pull requests and reported
     in [README.md](README.md)
 -   More tests to improve code coverage
 -   Status badges in [README.md](README.md)
@@ -119,20 +132,22 @@ This is a patch release to ensure compatibility with QuantLib 1.33.
 
 Initial open-source release
 
-[unreleased]: https://github.com/auto-differentiation/XAD/compare/v1.5.1...HEAD
+[unreleased]: https://github.com/auto-differentiation/xad/compare/v1.5.2...HEAD
 
-[1.5.1]: https://github.com/auto-differentiation/XAD/compare/v1.5.0...v1.5.1
+[1.5.2]: https://github.com/auto-differentiation/xad/compare/v1.5.1...v1.5.2
 
-[1.5.0]: https://github.com/auto-differentiation/XAD/compare/v1.4.1...v1.5.0
+[1.5.1]: https://github.com/auto-differentiation/xad/compare/v1.5.0...v1.5.1
 
-[1.4.1]: https://github.com/auto-differentiation/XAD/compare/v1.4.0...v1.4.1
+[1.5.0]: https://github.com/auto-differentiation/xad/compare/v1.4.1...v1.5.0
 
-[1.4.0]: https://github.com/auto-differentiation/XAD/compare/v1.3.0...v1.4.0
+[1.4.1]: https://github.com/auto-differentiation/xad/compare/v1.4.0...v1.4.1
 
-[1.3.0]: https://github.com/auto-differentiation/XAD/compare/v1.2.0...v1.3.0
+[1.4.0]: https://github.com/auto-differentiation/xad/compare/v1.3.0...v1.4.0
 
-[1.2.0]: https://github.com/auto-differentiation/XAD/compare/v1.1.0...v1.2.0
+[1.3.0]: https://github.com/auto-differentiation/xad/compare/v1.2.0...v1.3.0
 
-[1.1.0]: https://github.com/auto-differentiation/XAD/compare/v1.0.0...v1.1.0
+[1.2.0]: https://github.com/auto-differentiation/xad/compare/v1.1.0...v1.2.0
 
-[1.0.0]: https://github.com/auto-differentiation/XAD/releases/tag/v1.0.0
+[1.1.0]: https://github.com/auto-differentiation/xad/compare/v1.0.0...v1.1.0
+
+[1.0.0]: https://github.com/auto-differentiation/xad/releases/tag/v1.0.0
