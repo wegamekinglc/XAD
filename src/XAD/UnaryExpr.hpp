@@ -5,7 +5,7 @@
    This file is part of XAD, a comprehensive C++ library for
    automatic differentiation.
 
-   Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+   Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU Affero General Public License as published
@@ -24,9 +24,14 @@
 
 #pragma once
 
+#include <XAD/Config.hpp>
 #include <XAD/Expression.hpp>
+#ifdef XAD_ENABLE_JIT
+#include <XAD/JITExprTraits.hpp>
+#endif
 #include <XAD/Macros.hpp>
 #include <XAD/Traits.hpp>
+#include <type_traits>
 
 namespace xad
 {
@@ -53,12 +58,12 @@ struct UnaryDerivativeImpl<true>
 };
 }  // namespace detail
 
-template <class, class>
+template <class, class, class>
 struct Expression;
 
 /// Base class of all unary expressions
-template <class Scalar, class Op, class Expr>
-struct UnaryExpr : Expression<Scalar, UnaryExpr<Scalar, Op, Expr> >
+template <class Scalar, class Op, class Expr, class DerivativeType = Scalar>
+struct UnaryExpr : Expression<Scalar, UnaryExpr<Scalar, Op, Expr, DerivativeType>, DerivativeType>
 {
     typedef detail::UnaryDerivativeImpl<OperatorTraits<Op>::useResultBasedDerivatives == 1>
         der_impl;
@@ -66,39 +71,76 @@ struct UnaryExpr : Expression<Scalar, UnaryExpr<Scalar, Op, Expr> >
     {
     }
     XAD_INLINE Scalar value() const { return v_; }
-    template <class Tape>
-    XAD_INLINE void calc_derivatives(Tape& s, const Scalar& mul) const
+    template <class Tape, int Size>
+    XAD_INLINE void calc_derivatives(DerivInfo<Tape, Size>& info, Tape& s, const Scalar& mul) const
     {
         using xad::value;
-        a_.calc_derivatives(s, mul * der_impl::template derivative(op_, value(a_), v_));
+        a_.calc_derivatives(info, s, mul * der_impl::template derivative<>(op_, a_.value(), v_));
     }
-    template <class Tape>
-    XAD_INLINE void calc_derivatives(Tape& s) const
+    template <class Tape, int Size>
+    XAD_INLINE void calc_derivatives(DerivInfo<Tape, Size>& info, Tape& s) const
     {
         using xad::value;
-        a_.calc_derivatives(s, der_impl::template derivative(op_, value(a_), v_));
-    }
-
-    template <typename Slot>
-    XAD_INLINE void calc_derivatives(Slot* slot, Scalar* muls, int& n, const Scalar& mul) const
-    {
-        using xad::value;
-        a_.calc_derivatives(slot, muls, n, mul * der_impl::template derivative(op_, value(a_), v_));
-    }
-    template <typename It1, typename It2>
-    XAD_INLINE void calc_derivatives(It1& sit, It2& mit, const Scalar& mul) const
-    {
-        using xad::value;
-        a_.calc_derivatives(sit, mit, mul * der_impl::template derivative(op_, value(a_), v_));
+        a_.calc_derivatives(info, s, der_impl::template derivative<>(op_, value(a_), v_));
     }
 
     XAD_INLINE bool shouldRecord() const { return a_.shouldRecord(); }
 
-    XAD_INLINE Scalar derivative() const
+#ifdef XAD_ENABLE_JIT
+    uint32_t recordJIT(JITGraph& graph) const
+    {
+        static_assert(static_cast<uint16_t>(JITOpCodeFor<Op>::value) != 0xFFFF,
+                      "JIT opcode mapping missing for unary operator");
+        // Check ldexp first, then scalar constant, then simple unary
+        return recordJITDispatch(graph);
+    }
+
+  private:
+    // Tag dispatch based on operation type
+    uint32_t recordJITDispatch(JITGraph& graph) const
+    {
+        return recordJITImpl(graph,
+            std::integral_constant<int,
+                IsLdexpOp<Op>::value ? 2 : (HasScalarConstant<Op>::value ? 1 : 0)>{});
+    }
+
+    // Simple unary operation (no scalar constant, not ldexp)
+    uint32_t recordJITImpl(JITGraph& graph, std::integral_constant<int, 0>) const
+    {
+        uint32_t slotA = a_.recordJIT(graph);
+        constexpr JITOpCode opcode = JITOpCodeFor<Op>::value;
+        return graph.addNode(opcode, slotA);
+    }
+
+    // Scalar operation (has b_ member)
+    uint32_t recordJITImpl(JITGraph& graph, std::integral_constant<int, 1>) const
+    {
+        uint32_t slotA = a_.recordJIT(graph);
+        uint32_t slotB = recordJITConstant(graph, getScalarConstant(op_));
+        constexpr JITOpCode opcode = JITOpCodeFor<Op>::value;
+        // For scalar_sub1, scalar_div1, scalar_pow1: scalar is first operand
+        if (IsScalarFirstOp<Op>::value)
+            return graph.addNode(opcode, slotB, slotA);
+        else
+            return graph.addNode(opcode, slotA, slotB);
+    }
+
+    // ldexp operation (has exp_ member)
+    uint32_t recordJITImpl(JITGraph& graph, std::integral_constant<int, 2>) const
+    {
+        uint32_t slotA = a_.recordJIT(graph);
+        constexpr JITOpCode opcode = JITOpCodeFor<Op>::value;
+        double exp_val = getLdexpExponent(op_);
+        return graph.addNode(opcode, slotA, 0, 0, exp_val);  // Store exponent in immediate
+    }
+
+  public:
+#endif
+    XAD_INLINE DerivativeType derivative() const
     {
         using xad::derivative;
         using xad::value;
-        return der_impl::template derivative(op_, value(a_), v_) * derivative(a_);
+        return der_impl::template derivative<>(op_, value(a_), v_) * derivative(a_);
     }
 
   private:
@@ -107,8 +149,8 @@ struct UnaryExpr : Expression<Scalar, UnaryExpr<Scalar, Op, Expr> >
     Scalar v_;
 };
 
-template <class Scalar, class Op, class Expr>
-struct ExprTraits<UnaryExpr<Scalar, Op, Expr> >
+template <class Scalar, class Op, class Expr, class DerivativeType>
+struct ExprTraits<UnaryExpr<Scalar, Op, Expr, DerivativeType> >
 {
     static const bool isExpr = true;
     static const int numVariables = ExprTraits<Expr>::numVariables;
@@ -116,6 +158,8 @@ struct ExprTraits<UnaryExpr<Scalar, Op, Expr> >
     static const bool isReverse = ExprTraits<typename ExprTraits<Expr>::value_type>::isReverse;
     static const bool isLiteral = false;
     static const Direction direction = ExprTraits<typename ExprTraits<Expr>::value_type>::direction;
+    static const std::size_t vector_size =
+        ExprTraits<typename ExprTraits<Expr>::value_type>::vector_size;
 
     typedef typename ExprTraits<Scalar>::nested_type nested_type;
     typedef typename ExprTraits<Expr>::value_type value_type;

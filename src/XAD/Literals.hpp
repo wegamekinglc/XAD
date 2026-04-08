@@ -5,7 +5,7 @@
    This file is part of XAD, a comprehensive C++ library for
    automatic differentiation.
 
-   Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+   Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU Affero General Public License as published
@@ -24,22 +24,44 @@
 
 #pragma once
 
+#include <XAD/Config.hpp>
 #include <XAD/Expression.hpp>
+#ifdef XAD_ENABLE_JIT
+#include <XAD/JITCompiler.hpp>
+#include <XAD/JITExprTraits.hpp>
+#endif
 #include <XAD/Macros.hpp>
 #include <XAD/Tape.hpp>
 #include <XAD/Traits.hpp>
 
+#include <XAD/Vec.hpp>
 #include <algorithm>
 #include <iosfwd>
 #include <utility>
 
 namespace xad
 {
-template <class>
+template <class, std::size_t>
 class Tape;
+template <class, std::size_t>
+struct FReal;
 
-template <class Scalar, class Derived>
-struct ADTypeBase : public Expression<Scalar, Derived>
+template <class Scalar, std::size_t N>
+struct FRealTraits
+{
+    using type = FReal<Scalar, N>;
+    using derivative_type = Vec<Scalar, N>;
+};
+
+template <class Scalar>
+struct FRealTraits<Scalar, 1>
+{
+    using type = FReal<Scalar, 1>;
+    using derivative_type = Scalar;
+};
+
+template <class Scalar, class Derived, class DerivativeType = Scalar>
+struct ADTypeBase : public Expression<Scalar, Derived, DerivativeType>
 {
     typedef typename ExprTraits<Derived>::value_type value_type;
     typedef typename ExprTraits<Derived>::nested_type nested_type;
@@ -59,22 +81,22 @@ struct ADTypeBase : public Expression<Scalar, Derived>
     XAD_INLINE Scalar& value() { return a_; }
 
     template <class E>
-    XAD_INLINE Derived& operator+=(const Expression<Scalar, E>& x)
+    XAD_INLINE Derived& operator+=(const Expression<Scalar, E, DerivativeType>& x)
     {
         return derived() = (derived() + x);
     }
     template <class E>
-    XAD_INLINE Derived& operator-=(const Expression<Scalar, E>& x)
+    XAD_INLINE Derived& operator-=(const Expression<Scalar, E, DerivativeType>& x)
     {
         return derived() = (derived() - x);
     }
     template <class E>
-    XAD_INLINE Derived& operator*=(const Expression<Scalar, E>& x)
+    XAD_INLINE Derived& operator*=(const Expression<Scalar, E, DerivativeType>& x)
     {
         return derived() = (derived() * x);
     }
     template <class E>
-    XAD_INLINE Derived& operator/=(const Expression<Scalar, E>& x)
+    XAD_INLINE Derived& operator/=(const Expression<Scalar, E, DerivativeType>& x)
     {
         return derived() = (derived() / x);
     }
@@ -138,13 +160,13 @@ struct ADTypeBase : public Expression<Scalar, Derived>
     Scalar a_;
 };
 
-template <class>
+template <class, std::size_t>
 struct AReal;
-template <class>
+template <class, std::size_t>
 struct ADVar;
 
-template <class Scalar>
-struct ExprTraits<AReal<Scalar>>
+template <class Scalar, std::size_t M>
+struct ExprTraits<AReal<Scalar, M>>
 {
     static const bool isExpr = true;
     static const int numVariables = 1;
@@ -152,25 +174,32 @@ struct ExprTraits<AReal<Scalar>>
     static const bool isReverse = true;
     static const bool isLiteral = true;
     static const Direction direction = Direction::DIR_REVERSE;
+    static const std::size_t vector_size = M;
 
     typedef typename ExprTraits<Scalar>::nested_type nested_type;
-    typedef AReal<Scalar> value_type;
+    typedef AReal<Scalar, M> value_type;
     typedef Scalar scalar_type;
 };
 
-template <class Scalar>
-struct ExprTraits<ADVar<Scalar>> : public ExprTraits<AReal<Scalar>>
+template <class Scalar, std::size_t M>
+struct ExprTraits<ADVar<Scalar, M>> : public ExprTraits<AReal<Scalar, M>>
 {
 };
 
-template <class Scalar>
-struct AReal : public ADTypeBase<Scalar, AReal<Scalar>>
+template <class Scalar, std::size_t N = 1>
+struct AReal
+    : public ADTypeBase<Scalar, AReal<Scalar, N>, typename DerivativesTraits<Scalar, N>::type>
 {
-    typedef Tape<Scalar> tape_type;
-    typedef ADTypeBase<Scalar, AReal<Scalar>> base_type;
+    typedef Tape<Scalar, N> tape_type;
+    typedef ADTypeBase<Scalar, AReal<Scalar, N>, typename DerivativesTraits<Scalar, N>::type>
+        base_type;
     typedef typename tape_type::slot_type slot_type;
     typedef Scalar value_type;
     typedef typename ExprTraits<Scalar>::nested_type nested_type;
+    typedef typename DerivativesTraits<Scalar, N>::type derivative_type;
+#ifdef XAD_ENABLE_JIT
+    typedef JITCompiler<nested_type, N> jit_type;
+#endif
 
     XAD_INLINE AReal(nested_type val = nested_type()) : base_type(val), slot_(INVALID_SLOT) {}
 
@@ -183,13 +212,25 @@ struct AReal : public ADTypeBase<Scalar, AReal<Scalar>>
 
     XAD_INLINE AReal(const AReal& o) : base_type(), slot_(INVALID_SLOT)
     {
-        if (o.shouldRecord())
+        if (auto* s = tape_type::getActive())
         {
-            auto s = tape_type::getActive();
-            slot_ = s->registerVariable();
-            o.calc_derivatives(*s);
-            s->pushLhs(slot_);
+            if (o.shouldRecord())
+            {
+                slot_ = s->registerVariable();
+                pushAll<1>(s, o);
+                s->pushLhs(slot_);
+            }
         }
+#ifdef XAD_ENABLE_JIT
+        else if (getActiveJit() != nullptr)
+        {
+            if (o.shouldRecord())
+            {
+                // Copy the slot directly - preserves JIT dependency chain
+                slot_ = o.slot_;
+            }
+        }
+#endif
         this->a_ = o.getValue();
     }
 
@@ -213,8 +254,8 @@ struct AReal : public ADTypeBase<Scalar, AReal<Scalar>>
 
     XAD_INLINE ~AReal()
     {
-        if (slot_ != INVALID_SLOT)
-            if (auto tape = tape_type::getActive())
+        if (auto tape = tape_type::getActive())
+            if (slot_ != INVALID_SLOT)
                 tape->unregisterVariable(slot_);
     }
 
@@ -223,74 +264,172 @@ struct AReal : public ADTypeBase<Scalar, AReal<Scalar>>
     XAD_INLINE AReal& operator=(nested_type x)
     {
         this->a_ = x;
-        if (slot_ != INVALID_SLOT)
-            tape_type::getActive()->pushLhs(slot_);
+        auto tape = tape_type::getActive();
+        if (tape && slot_ != INVALID_SLOT)
+            tape->pushLhs(slot_);
         return *this;
     }
 
     template <class Expr>
-    XAD_INLINE AReal(
-        const Expression<Scalar, Expr>& expr);  // cppcheck-suppress noExplicitConstructor
+    XAD_INLINE AReal(const Expression<Scalar, Expr, derivative_type>&
+                         expr);  // cppcheck-suppress noExplicitConstructor
 
     template <class Expr>
-    XAD_INLINE AReal& operator=(const Expression<Scalar, Expr>& expr);
+    XAD_INLINE AReal& operator=(const Expression<Scalar, Expr, derivative_type>& expr);
 
-    XAD_INLINE void setDerivative(Scalar a) { derivative() = a; }
-    XAD_INLINE void setAdjoint(Scalar a) { setDerivative(a); }
-    XAD_INLINE Scalar getAdjoint() const { return getDerivative(); }
+    XAD_INLINE void setDerivative(derivative_type a) { derivative() = a; }
+    XAD_INLINE void setAdjoint(derivative_type a) { setDerivative(a); }
+    XAD_INLINE derivative_type getAdjoint() const { return getDerivative(); }
 
-    XAD_INLINE void calc_derivatives(tape_type& s, const Scalar& mul) const
+#ifdef XAD_ENABLE_JIT
+  private:
+    // JIT is intentionally limited to scalar, first-order mode only:
+    // - vector mode (N>1) is not supported
+    // - higher-order AD (Scalar != nested_type) is not supported
+    enum
+    {
+        jit_supported = std::is_same<Scalar, nested_type>::value && (N == 1)
+    };
+
+    static XAD_INLINE jit_type* getActiveJitImpl(std::true_type) { return jit_type::getActive(); }
+    static XAD_INLINE jit_type* getActiveJitImpl(std::false_type) { return nullptr; }
+    static XAD_INLINE jit_type* getActiveJit()
+    {
+        return getActiveJitImpl(std::integral_constant<bool, jit_supported>());
+    }
+
+    template <class Expr>
+    XAD_INLINE void tryRecordJitFromExprCtor(const Expression<Scalar, Expr, derivative_type>& expr,
+                                             std::true_type)
+    {
+        if (auto* j = jit_type::getActive())
+        {
+            if (expr.shouldRecord())
+                slot_ = static_cast<const Expr&>(expr).recordJIT(j->getGraph());
+        }
+    }
+
+    template <class Expr>
+    XAD_INLINE void tryRecordJitFromExprCtor(const Expression<Scalar, Expr, derivative_type>&,
+                                             std::false_type)
+    {
+    }
+
+    template <class Expr>
+    XAD_INLINE void tryRecordJitFromExprAssign(const Expression<Scalar, Expr, derivative_type>& expr,
+                                               std::true_type)
+    {
+        if (auto* j = jit_type::getActive())
+        {
+            if (expr.shouldRecord() || this->shouldRecord())
+                slot_ = static_cast<const Expr&>(expr).recordJIT(j->getGraph());
+        }
+    }
+
+    template <class Expr>
+    XAD_INLINE void tryRecordJitFromExprAssign(const Expression<Scalar, Expr, derivative_type>&,
+                                               std::false_type)
+    {
+    }
+
+  private:
+    // Only enable the JIT derivative path when it is type-correct.
+    // For higher-order AD (Scalar != nested_type) we must not even instantiate code that
+    // would return JITCompiler<nested_type,N>::derivative_type as derivative_type.
+    XAD_INLINE const derivative_type* tryGetJitDerivativePtr(std::true_type) const
+    {
+        auto j = getActiveJit();
+        if (!j)
+            return nullptr;
+        if (slot_ == INVALID_SLOT)
+        {
+            static const derivative_type zero = derivative_type();
+            return &zero;
+        }
+        return &j->derivative(slot_);
+    }
+
+    XAD_INLINE const derivative_type* tryGetJitDerivativePtr(std::false_type) const
+    {
+        return nullptr;
+    }
+
+    XAD_INLINE derivative_type* tryGetJitDerivativePtr(std::true_type)
+    {
+        auto j = getActiveJit();
+        if (!j)
+            return nullptr;
+        if (slot_ == INVALID_SLOT)
+            slot_ = j->registerVariable();
+        return &j->derivative(slot_);
+    }
+
+    XAD_INLINE derivative_type* tryGetJitDerivativePtr(std::false_type)
+    {
+        return nullptr;
+    }
+
+  public:
+#endif
+
+    template <int Size>
+    XAD_FORCE_INLINE void pushRhs(DerivInfo<tape_type, Size>& info, const Scalar& mul,
+                                  slot_type slot) const
+    {
+        info.multipliers[info.index] = mul;
+        info.slots[info.index++] = slot;
+    }
+
+    template <int Size>
+    XAD_FORCE_INLINE void calc_derivatives(DerivInfo<tape_type, Size>& info, tape_type&,
+                                           const Scalar& mul) const
     {
         if (slot_ != INVALID_SLOT)
-            s.pushRhs(mul, slot_);
+            pushRhs(info, mul, slot_);
     }
 
-    XAD_INLINE void calc_derivatives(tape_type& s) const
+    template <int Size>
+    XAD_FORCE_INLINE void calc_derivatives(DerivInfo<tape_type, Size>& info, tape_type&) const
     {
         if (slot_ != INVALID_SLOT)
-            s.pushRhs(Scalar(1), slot_);
+            pushRhs(info, Scalar(1), slot_);
     }
 
-    template <typename Slot>
-    XAD_INLINE void calc_derivatives(Slot* slot, Scalar* muls, int& n, const Scalar& mul) const
-    {
-        assert(false);
-        slot[n] = slot_;
-        muls[n] = mul;
-        ++n;
-    }
+    XAD_INLINE derivative_type getDerivative() const { return derivative(); }
 
-    template <typename It1, typename It2>
-    XAD_INLINE void calc_derivatives(It1& sit, It2& mit, const Scalar& mul) const
-    {
-        assert(false);
-        ::new (&*sit) slot_type(slot_);
-        ::new (&*mit) Scalar(mul);
-        ++sit;
-        ++mit;
-    }
-
-    XAD_INLINE Scalar getDerivative() const { return derivative(); }
-
-    XAD_INLINE const Scalar& derivative() const
+    XAD_INLINE const derivative_type& derivative() const
     {
         auto t = tape_type::getActive();
         if (!t)
+        {
+#ifdef XAD_ENABLE_JIT
+            if (const derivative_type* d =
+                    tryGetJitDerivativePtr(std::integral_constant<bool, jit_supported>()))
+                return *d;
+#endif
             throw NoTapeException();
+        }
         if (slot_ == INVALID_SLOT)
         {
             // we return a dummy const ref if not registered on tape - always zero
-            static const Scalar zero = Scalar();
+            static const derivative_type zero = derivative_type();
             return zero;
         }
         return t->derivative(slot_);
     }
 
-    XAD_INLINE Scalar& derivative()
+    XAD_INLINE derivative_type& derivative()
     {
         auto t = tape_type::getActive();
         if (!t)
+        {
+#ifdef XAD_ENABLE_JIT
+            if (derivative_type* d =
+                    tryGetJitDerivativePtr(std::integral_constant<bool, jit_supported>()))
+                return *d;
+#endif
             throw NoTapeException();
+        }
         // register ourselves if not already done
         if (slot_ == INVALID_SLOT)
         {
@@ -301,9 +440,35 @@ struct AReal : public ADTypeBase<Scalar, AReal<Scalar>>
     }
     XAD_INLINE bool shouldRecord() const { return slot_ != INVALID_SLOT; }
 
+#ifdef XAD_ENABLE_JIT
+    uint32_t recordJIT(JITGraph& graph) const
+    {
+        if (slot_ != INVALID_SLOT)
+            return slot_;
+        // Not registered - treat as constant (handles nested AD types)
+        return recordJITConstant(graph, getNestedDoubleValue(this->a_));
+    }
+#endif
+
   private:
-    template <class T>
+    template <int Size, typename Expr>
+    XAD_FORCE_INLINE void pushAll(tape_type* t, const Expr& expr) const
+    {
+        DerivInfo<tape_type, Size> info;
+
+        expr.calc_derivatives(info, *t);
+
+        t->pushAll(info.multipliers, info.slots, info.index);
+    }
+
+    template <class T, std::size_t d__cnt>
     friend class Tape;
+#ifdef XAD_ENABLE_JIT
+    template <class T, std::size_t d__cnt>
+    friend class JITCompiler;
+    template <class T, std::size_t d__cnt>
+    friend class ABool;
+#endif
     typename tape_type::slot_type slot_;
 };
 
@@ -311,97 +476,133 @@ struct AReal : public ADTypeBase<Scalar, AReal<Scalar>>
 // the Tape
 // when this guy is copied (unlike the AReal<T> copy)
 // therefore we can use auto = ... in expressions
-template <class Scalar>
-struct ADVar : public Expression<Scalar, ADVar<Scalar>>
+template <class Scalar, std::size_t N = 1>
+struct ADVar
+    : public Expression<Scalar, ADVar<Scalar, N>, typename DerivativesTraits<Scalar, N>::type>
 {
-    typedef AReal<Scalar> areal_type;
+    typedef AReal<Scalar, N> areal_type;
     typedef typename areal_type::tape_type tape_type;
 
-    XAD_INLINE explicit ADVar(const AReal<Scalar>& a) : ar_(a), shouldRecord_(a.shouldRecord()) {}
+    XAD_INLINE explicit ADVar(const areal_type& a) : ar_(a), shouldRecord_(a.shouldRecord()) {}
 
     XAD_INLINE Scalar getValue() const { return ar_.getValue(); }
 
     XAD_INLINE const Scalar& value() const { return ar_.value(); }
 
-    XAD_INLINE void calc_derivatives(tape_type& s, const Scalar& mul) const
+    template <int Size>
+    XAD_INLINE void calc_derivatives(DerivInfo<tape_type, Size>& info, tape_type& s,
+                                     const Scalar& mul) const
     {
-        ar_.calc_derivatives(s, mul);
-    }
-    XAD_INLINE void calc_derivatives(tape_type& s) const { ar_.calc_derivative(s); }
-    template <typename Slot>
-    XAD_INLINE void calc_derivatives(Slot* slot, Scalar* muls, int& n, const Scalar& mul) const
-    {
-        ar_.calc_derivatives(slot, muls, n, mul);
+        ar_.calc_derivatives(info, s, mul);
     }
 
-    template <typename It1, typename It2>
-    XAD_INLINE void calc_derivatives(It1& sit, It2& mit, const Scalar& mul) const
+    template <int Size>
+    XAD_INLINE void calc_derivatives(DerivInfo<tape_type, Size>& info, tape_type& s) const
     {
-        ar_.calc_derivatives(sit, mit, mul);
+        ar_.calc_derivative(info, s);
     }
 
-    XAD_INLINE const Scalar& derivative() const { return ar_.derivative(); }
+    XAD_INLINE const typename areal_type::derivative_type& derivative() const
+    {
+        return ar_.derivative();
+    }
 
     XAD_INLINE bool shouldRecord() const { return shouldRecord_; }
+
+#ifdef XAD_ENABLE_JIT
+    uint32_t recordJIT(JITGraph& graph) const { return ar_.recordJIT(graph); }
+#endif
 
   private:
     areal_type const& ar_;
     bool shouldRecord_;
 };
 
-template <class Scalar>
-XAD_INLINE AReal<Scalar>& AReal<Scalar>::operator=(const AReal& o)
+template <class Scalar, std::size_t M>
+XAD_INLINE AReal<Scalar, M>& AReal<Scalar, M>::operator=(const AReal& o)
 {
-    if (o.shouldRecord() || this->shouldRecord())
+    if (auto* s = tape_type::getActive())
     {
-        tape_type* s = tape_type::getActive();
-        if (slot_ == INVALID_SLOT)
-            slot_ = s->registerVariable();
-        o.calc_derivatives(*s);
-        s->pushLhs(slot_);
+        if (o.shouldRecord() || this->shouldRecord())
+        {
+            if (slot_ == INVALID_SLOT)
+                slot_ = s->registerVariable();
+            pushAll<1>(s, o);
+            s->pushLhs(slot_);
+        }
     }
+#ifdef XAD_ENABLE_JIT
+    else if (getActiveJit() != nullptr)
+    {
+        if (o.shouldRecord() || this->shouldRecord())
+        {
+            // Copy the slot directly - preserves JIT dependency chain
+            slot_ = o.slot_;
+        }
+    }
+#endif
     this->a_ = o.getValue();
     return *this;
 }
 
-template <class Scalar>
+template <class Scalar, std::size_t M>
 template <class Expr>
-XAD_INLINE AReal<Scalar>::AReal(Expression<Scalar, Expr> const& expr)
+XAD_INLINE AReal<Scalar, M>::AReal(
+    const Expression<Scalar, Expr, typename DerivativesTraits<Scalar, M>::type>& expr)
     : base_type(expr.getValue()), slot_(INVALID_SLOT)
 {
-    if (expr.shouldRecord())
+    tape_type* s = tape_type::getActive();
+    if (s)
     {
-        tape_type* s = tape_type::getActive();
-        slot_ = s->registerVariable();
-        expr.calc_derivatives(*s);
-        s->pushLhs(slot_);
+        if (expr.shouldRecord())
+        {
+            slot_ = s->registerVariable();
+            pushAll<ExprTraits<Expr>::numVariables>(s, expr);
+            s->pushLhs(slot_);
+        }
     }
+#ifdef XAD_ENABLE_JIT
+    else
+    {
+        this->tryRecordJitFromExprCtor(expr, std::integral_constant<bool, jit_supported>());
+    }
+#endif
 }
 
-template <class Scalar>
+template <class Scalar, std::size_t M>
 template <class Expr>
-XAD_INLINE AReal<Scalar>& AReal<Scalar>::operator=(const Expression<Scalar, Expr>& expr)
+XAD_INLINE AReal<Scalar, M>& AReal<Scalar, M>::operator=(
+    const Expression<Scalar, Expr, typename DerivativesTraits<Scalar, M>::type>& expr)
 {
-    if (expr.shouldRecord() || this->shouldRecord())
+    tape_type* s = tape_type::getActive();
+    if (s)
     {
-        tape_type* s = tape_type::getActive();
-        expr.calc_derivatives(*s);
-        // only register this variable after evaluating the expression, as this
-        // variable might appear on the rhs of the equation too and if not yet
-        // registered, it doesn't need recording of derivatives
-        if (slot_ == INVALID_SLOT)
-            slot_ = s->registerVariable();
-        s->pushLhs(slot_);
+        if (expr.shouldRecord() || this->shouldRecord())
+        {
+            pushAll<ExprTraits<Expr>::numVariables>(s, expr);
+            // only register this variable after evaluating the expression, as this
+            // variable might appear on the rhs of the equation too and if not yet
+            // registered, it doesn't need recording of derivatives
+            if (slot_ == INVALID_SLOT)
+                slot_ = s->registerVariable();
+            s->pushLhs(slot_);
+        }
     }
+#ifdef XAD_ENABLE_JIT
+    else
+    {
+        this->tryRecordJitFromExprAssign(expr, std::integral_constant<bool, jit_supported>());
+    }
+#endif
     this->a_ = expr.getValue();
     return *this;
 }
 
-template <class>
+template <class, std::size_t>
 struct FReal;
 
-template <class Scalar>
-struct ExprTraits<FReal<Scalar>>
+template <class Scalar, std::size_t N>
+struct ExprTraits<FReal<Scalar, N>>
 {
     static const bool isExpr = true;
     static const int numVariables = 1;
@@ -409,20 +610,62 @@ struct ExprTraits<FReal<Scalar>>
     static const bool isReverse = false;
     static const bool isLiteral = true;
     static const Direction direction = Direction::DIR_FORWARD;
+    static const std::size_t vector_size = 1;
 
     typedef typename ExprTraits<Scalar>::nested_type nested_type;
-    typedef FReal<Scalar> value_type;
+    typedef FReal<Scalar, N> value_type;
     typedef Scalar scalar_type;
 };
 
-template <class Scalar>
-struct FReal : public ADTypeBase<Scalar, FReal<Scalar>>
+template <class, std::size_t>
+struct FRealDirect;
+
+template <class Scalar, std::size_t N>
+struct ExprTraits<FRealDirect<Scalar, N>>
 {
-    typedef ADTypeBase<Scalar, FReal<Scalar>> base_type;
+    static const bool isExpr = false;
+    static const int numVariables = 1;
+    static const bool isForward = true;
+    static const bool isReverse = false;
+    static const bool isLiteral = true;
+    static const Direction direction = Direction::DIR_FORWARD;
+    static const std::size_t vector_size = N;
+
+    typedef typename ExprTraits<Scalar>::nested_type nested_type;
+    typedef FRealDirect<Scalar, N> value_type;
+    typedef Scalar scalar_type;
+};
+
+template <class, std::size_t>
+struct ARealDirect;
+
+template <class Scalar, std::size_t N>
+struct ExprTraits<ARealDirect<Scalar, N>>
+{
+    static const bool isExpr = false;
+    static const int numVariables = 1;
+    static const bool isForward = false;
+    static const bool isReverse = true;
+    static const bool isLiteral = true;
+    static const Direction direction = Direction::DIR_REVERSE;
+    static const std::size_t vector_size = N;
+
+    typedef typename ExprTraits<Scalar>::nested_type nested_type;
+    typedef ARealDirect<Scalar, N> value_type;
+    typedef Scalar scalar_type;
+};
+
+template <class Scalar, std::size_t N = 1>
+struct FReal
+    : public ADTypeBase<Scalar, FReal<Scalar, N>, typename FRealTraits<Scalar, N>::derivative_type>
+{
+    typedef typename FRealTraits<Scalar, N>::derivative_type derivative_type;
+    typedef ADTypeBase<Scalar, typename FRealTraits<Scalar, N>::type, derivative_type> base_type;
     typedef Scalar value_type;
     typedef typename ExprTraits<Scalar>::nested_type nested_type;
 
-    constexpr XAD_INLINE FReal(nested_type val = nested_type(), nested_type der = nested_type())
+    constexpr XAD_INLINE FReal(nested_type val = nested_type(),
+                               derivative_type der = derivative_type())
         : base_type(val), der_(der)
     {
     }
@@ -443,22 +686,21 @@ struct FReal : public ADTypeBase<Scalar, FReal<Scalar>>
     XAD_INLINE FReal& operator=(nested_type x)
     {
         this->a_ = x;
-        der_ = nested_type();
+        der_ = derivative_type();
         return *this;
     }
 
     template <class Expr>
-    XAD_INLINE FReal(
-        const Expression<Scalar, Expr>& expr);  // cppcheck-suppress noExplicitConstructor
+    XAD_INLINE FReal(const Expression<Scalar, Expr, derivative_type>& expr);
     template <class Expr>
-    XAD_INLINE FReal& operator=(const Expression<Scalar, Expr>& expr);
+    XAD_INLINE FReal& operator=(const Expression<Scalar, Expr, derivative_type>& expr);
 
     XAD_INLINE ~FReal() = default;
 
-    XAD_INLINE void setDerivative(Scalar a) { derivative() = a; }
-    XAD_INLINE Scalar getDerivative() const { return derivative(); }
-    XAD_INLINE Scalar& derivative() { return der_; }
-    XAD_INLINE const Scalar& derivative() const { return der_; }
+    XAD_INLINE void setDerivative(derivative_type a) { derivative() = a; }
+    XAD_INLINE derivative_type getDerivative() const { return derivative(); }
+    XAD_INLINE derivative_type& derivative() { return der_; }
+    XAD_INLINE const derivative_type& derivative() const { return der_; }
 
     // functions in base class that are meant only for reverse mode are
     // implemented here as stubs. They are never called, but this avoids
@@ -470,19 +712,21 @@ struct FReal : public ADTypeBase<Scalar, FReal<Scalar>>
     }
 
   private:
-    Scalar der_;
+    derivative_type der_;
 };
 
-template <class Scalar>
+template <class Scalar, std::size_t N>
 template <class Expr>
-XAD_INLINE FReal<Scalar>::FReal(const Expression<Scalar, Expr>& expr)
+XAD_INLINE FReal<Scalar, N>::FReal(
+    const Expression<Scalar, Expr, typename FReal<Scalar, N>::derivative_type>& expr)
     : base_type(xad::value(expr)), der_(xad::derivative(expr))
 {
 }
 
-template <class Scalar>
+template <class Scalar, std::size_t N>
 template <class Expr>
-XAD_INLINE FReal<Scalar>& FReal<Scalar>::operator=(const Expression<Scalar, Expr>& expr)
+XAD_INLINE FReal<Scalar, N>& FReal<Scalar, N>::operator=(
+    const Expression<Scalar, Expr, typename FReal<Scalar, N>::derivative_type>& expr)
 {
     using xad::derivative;
     using xad::value;
@@ -491,26 +735,26 @@ XAD_INLINE FReal<Scalar>& FReal<Scalar>::operator=(const Expression<Scalar, Expr
     return *this;
 }
 
-template <class Scalar>
-XAD_INLINE const Scalar& value(const AReal<Scalar>& x)
+template <class Scalar, std::size_t M = 1>
+XAD_INLINE const Scalar& value(const AReal<Scalar, M>& x)
 {
     return x.value();
 }
 
-template <class Scalar>
-XAD_INLINE Scalar& value(AReal<Scalar>& x)
+template <class Scalar, std::size_t M>
+XAD_INLINE Scalar& value(AReal<Scalar, M>& x)
 {
     return x.value();
 }
 
-template <class Scalar>
-XAD_INLINE const Scalar& value(const FReal<Scalar>& x)
+template <class Scalar, std::size_t N>
+XAD_INLINE const Scalar& value(const FReal<Scalar, N>& x)
 {
     return x.value();
 }
 
-template <class Scalar>
-XAD_INLINE Scalar& value(FReal<Scalar>& x)
+template <class Scalar, std::size_t N>
+XAD_INLINE Scalar& value(FReal<Scalar, N>& x)
 {
     return x.value();
 }
@@ -530,26 +774,26 @@ value(const T& x)
     return x;
 }
 
-template <class Scalar>
-XAD_INLINE const Scalar& derivative(const FReal<Scalar>& fr)
+template <class Scalar, std::size_t N>
+XAD_INLINE const typename FReal<Scalar, N>::derivative_type& derivative(const FReal<Scalar, N>& fr)
 {
     return fr.derivative();
 }
 
-template <class Scalar>
-XAD_INLINE Scalar& derivative(FReal<Scalar>& fr)
+template <class Scalar, std::size_t N>
+XAD_INLINE typename FReal<Scalar, N>::derivative_type& derivative(FReal<Scalar, N>& fr)
 {
     return fr.derivative();
 }
 
-template <class Scalar>
-XAD_INLINE const Scalar& derivative(const AReal<Scalar>& fr)
+template <class Scalar, std::size_t M = 1>
+XAD_INLINE const typename AReal<Scalar, M>::derivative_type& derivative(const AReal<Scalar, M>& fr)
 {
     return fr.derivative();
 }
 
-template <class Scalar>
-XAD_INLINE Scalar& derivative(AReal<Scalar>& fr)
+template <class Scalar, std::size_t M = 1>
+XAD_INLINE typename AReal<Scalar, M>::derivative_type& derivative(AReal<Scalar, M>& fr)
 {
     return fr.derivative();
 }
@@ -568,21 +812,21 @@ derivative(const T&)
     return T();
 }
 
-template <class C, class T, class Scalar, class Derived>
+template <class C, class T, class Scalar, class Derived, class Deriv>
 XAD_INLINE std::basic_ostream<C, T>& operator<<(std::basic_ostream<C, T>& os,
-                                                const Expression<Scalar, Derived>& x)
+                                                const Expression<Scalar, Derived, Deriv>& x)
 {
     return os << value(x);
 }
 
-template <class C, class T, class Scalar>
-XAD_INLINE std::basic_istream<C, T>& operator>>(std::basic_istream<C, T>& is, AReal<Scalar>& x)
+template <class C, class T, class Scalar, std::size_t N>
+XAD_INLINE std::basic_istream<C, T>& operator>>(std::basic_istream<C, T>& is, AReal<Scalar, N>& x)
 {
     return is >> value(x);
 }
 
-template <class C, class T, class Scalar>
-XAD_INLINE std::basic_istream<C, T>& operator>>(std::basic_istream<C, T>& is, FReal<Scalar>& x)
+template <class C, class T, class Scalar, std::size_t N>
+XAD_INLINE std::basic_istream<C, T>& operator>>(std::basic_istream<C, T>& is, FReal<Scalar, N>& x)
 {
     return is >> value(x);
 }
@@ -592,4 +836,138 @@ typedef AReal<float> AF;
 
 typedef FReal<double> FAD;
 typedef FReal<float> FAF;
+
+typedef ARealDirect<double, 1> ADD;
+typedef ARealDirect<float, 1> AFD;
 }  // namespace xad
+
+
+#if __clang_major__ > 16 && defined(_LIBCPP_VERSION)
+
+namespace std {
+
+// to make libc++ happy when calling pow(AReal, int) and similar functions
+template<class T, class T1, std::size_t N>
+class __promote<xad::AReal<T, N>, T1> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, class T1, std::size_t N>
+class __promote<T1, xad::AReal<T, N>> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, std::size_t N>
+class __promote<xad::AReal<T, N>, xad::AReal<T, N>> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, class T1, class T2, std::size_t N>
+class __promote<xad::AReal<T, N>, T1, T2> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, class T1, class T2, std::size_t N>
+class __promote<T1, xad::AReal<T, N>, T2> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, class T1, class T2, std::size_t N>
+class __promote<T1, T2, xad::AReal<T, N>> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, class T2, std::size_t N>
+class __promote<xad::AReal<T, N>, xad::AReal<T, N>, T2> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, class T2, std::size_t N>
+class __promote<xad::AReal<T, N>, T2, xad::AReal<T, N>> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, class T2, std::size_t N>
+class __promote<T2, xad::AReal<T, N>, xad::AReal<T, N>> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+template<class T, std::size_t N>
+class __promote<xad::AReal<T, N>, xad::AReal<T, N>, xad::AReal<T, N>> {
+public:
+   using type = xad::AReal<T, N>;
+};
+
+// for for FReal
+template<class T, class T1, std::size_t N>
+class __promote<xad::FReal<T, N>, T1> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, class T1, std::size_t N>
+class __promote<T1, xad::FReal<T, N>> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, std::size_t N>
+class __promote<xad::FReal<T, N>, xad::FReal<T, N>> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, class T1, class T2, std::size_t N>
+class __promote<xad::FReal<T, N>, T1, T2> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, class T1, class T2, std::size_t N>
+class __promote<T1, xad::FReal<T, N>, T2> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, class T1, class T2, std::size_t N>
+class __promote<T1, T2, xad::FReal<T, N>> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, class T2, std::size_t N>
+class __promote<xad::FReal<T, N>, xad::FReal<T, N>, T2> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, class T2, std::size_t N>
+class __promote<xad::FReal<T, N>, T2, xad::FReal<T, N>> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, class T2, std::size_t N>
+class __promote<T2, xad::FReal<T, N>, xad::FReal<T, N>> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+template<class T, std::size_t N>
+class __promote<xad::FReal<T, N>, xad::FReal<T, N>, xad::FReal<T, N>> {
+public:
+   using type = xad::FReal<T, N>;
+};
+
+}
+
+#endif

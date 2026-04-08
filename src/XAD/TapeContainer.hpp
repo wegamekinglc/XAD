@@ -5,7 +5,7 @@
    This file is part of XAD, a comprehensive C++ library for
    automatic differentiation.
 
-   Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+   Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU Affero General Public License as published
@@ -25,14 +25,26 @@
 #pragma once
 
 #include <XAD/ChunkContainer.hpp>
+#ifdef XAD_REDUCED_MEMORY
+#include <XAD/OperationsContainer.hpp>
+#else
+#include <XAD/OperationsContainerPaired.hpp>
+#endif
+
+#include <utility>
 
 namespace xad
 {
 
-template <class T>
+template <class T, class S = unsigned>
 struct TapeContainerTraits
 {
-    typedef ChunkContainer<T> type;
+    using statements_type = ChunkContainer<std::pair<S, S>>;
+#ifdef XAD_REDUCED_MEMORY
+    using operations_type = OperationsContainer<T, S>;
+#else
+    using operations_type = OperationsContainerPaired<T, S>;
+#endif
 };
 
 }  // namespace xad

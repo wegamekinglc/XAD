@@ -1,11 +1,11 @@
 ##############################################################################
-#   
+#
 #  Setup of CMake options
 #
 #  This file is part of XAD, a comprehensive C++ library for
 #  automatic differentiation.
 #
-#  Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+#  Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU Affero General Public License as published
@@ -19,7 +19,7 @@
 #
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#   
+#
 ##############################################################################
 
 include(CMakeDependentOption)
@@ -31,6 +31,7 @@ if(CMAKE_PROJECT_NAME STREQUAL "xad")
 else()
     option(XAD_ENABLE_TESTS "Enable the XAD tests" OFF)
 endif()
+option(XAD_ENABLE_EIGEN_TESTS "Enable the Eigen tests" OFF)
 option(XAD_WARNINGS_PARANOID "Use extra-paranoid warning level" ON)
 option(XAD_POSITION_INDEPENDENT_CODE "Generate PIC code, so it can be linked into a shared library" ON)
 
@@ -63,10 +64,17 @@ endif()
 # Tape options: these end up in Config.hpp, a cmake-generated file
 option(XAD_TAPE_REUSE_SLOTS "Reuse slots in tape that have become free (slower, less memory)" OFF)
 option(XAD_NO_THREADLOCAL "Disable thread-local tape - only for single-threaded tape use" OFF)
-if (MSVC AND MSVC_VERSION GREATER_EQUAL 1920)
-    option(XAD_USE_STRONG_INLINE "Use forced inlining for higher preformance, at a higher compile time cost" OFF)
-else()
-    # in VS 2015 and 2017, without strong inlining, some long expressions in release mode get miscompiled
-    set(XAD_USE_STRONG_INLINE ON CACHE BOOL "Use forced inlining for higher preformance, at a higher compile time cost" FORCE)
-endif()
+option(XAD_USE_STRONG_INLINE "Use forced inlining for higher performance, at a higher compile time cost" OFF)
 option(XAD_ALLOW_INT_CONVERSION "Add real->int conversion operator, potentially missing to track dependencies" ON)
+option(XAD_REDUCED_MEMORY "Reduce memory required for tape, at a slight performance cost" OFF)
+option(XAD_ENABLE_CODEGEN "Enable codegen (JIT compilation) support" OFF)
+
+# XAD_ENABLE_JIT is set when CODEGEN is on, for internal headers
+if(XAD_ENABLE_CODEGEN)
+    set(XAD_ENABLE_JIT ON CACHE BOOL "" FORCE)
+    message(STATUS "Codegen (JIT compilation) support enabled")
+endif()
+
+if(XAD_REDUCED_MEMORY)
+    message(STATUS "Using reduced memory for tape storage at a slight performance cost")
+endif()

@@ -4,11 +4,18 @@
   </a>
 </p>
 
-# 🚀 XAD: Powerful Automatic Differentiation for C++ & Python
+# XAD: The fastest automatic differentiation library for C++
 
-**XAD** is the ultimate solution for automatic differentiation, combining **ease of use** with **high performance**.
-It's designed to help you differentiate complex applications with speed and precision—whether
-you're optimizing neural networks, solving scientific problems, or performing financial risk analysis.
+XAD is a high-performance C++ automatic differentiation library designed for large-scale, performance-critical systems.
+
+It provides forward and adjoint (reverse) mode automatic differentiation via operator overloading, with a strong focus on:
+
+* Low runtime overhead
+* Minimal memory footprint
+* Straightforward integration into existing C++ codebases
+
+For Monte Carlo and other repetitive workloads, XAD also provides an abstract JIT backend interface,
+enabling record-once / replay-many execution for additional performance.
 
 <p align="center" dir="auto">
     <a href="https://github.com/auto-differentiation/xad/releases/latest">
@@ -21,44 +28,40 @@ you're optimizing neural networks, solving scientific problems, or performing fi
         <img src="https://img.shields.io/github/actions/workflow/status/auto-differentiation/xad/ci.yml?label=Build&logo" alt="Build Status" style="max-width: 100%;">
     </a>
     <a href="https://coveralls.io/github/auto-differentiation/xad?branch=main">
-        <img src="https://coveralls.io/repos/github/auto-differentiation/xad/badge.svg?branch=main" alt="Coverage" style="max-width: 100%;">
+        <img src="https://coveralls.io/repos/github/auto-differentiation/xad/badge.svg?branch=main&v=2" alt="Coverage" style="max-width: 100%;">
     </a>
     <a href="https://www.codacy.com/gh/auto-differentiation/xad/dashboard">
         <img src="https://img.shields.io/codacy/grade/1826d0a6c8ce4feb81ef3b482d65c7b4?logo=codacy&label=Quality%20%28Codacy%29" alt="Codacy Quality" style="max-width: 100%;">
     </a>
 </p>
 
-## 🌟 Why XAD?
+## Key Features
 
-XAD is trusted by professionals for its **speed**, **flexibility**, and **scalability** across various fields:
-
-- **Machine Learning & Deep Learning**: Accelerate neural network training and model optimization.
-- **Optimization in Engineering & Finance**: Solve complex problems with high precision.
-- **Numerical Analysis**: Improve methods for solving differential equations efficiently.
-- **Scientific Computing**: Simulate physical systems and processes with precision.
-- **Risk Management & Quantitative Finance**: Assess and hedge risks in sophisticated financial models.
-- **Computer Graphics**: Optimize rendering algorithms for high-quality graphics.
-- **Robotics**: Enhance control and simulation for robotic systems.
-- **Meteorology**: Improve accuracy in weather prediction models.
-- **Biotechnology**: Model complex biological processes effectively.
-
-### Key Features
-
-- **Forward & Adjoint Mode**: Supports any order using operator overloading.
+- **Forward & Reverse (Adjoint) Mode**: Supports any order using operator overloading.
+- **Vector mode**: Compute multiple derivatives at once.
 - **Checkpointing Support**: Efficient tape memory management for large-scale applications.
 - **External Function Interface**: Seamlessly connect with external libraries.
-- **Thread-Safe Tape**: Ensure safe, concurrent operations.
-- **Exception-Safe**: Formal guarantees for stability and error handling.
-- **High Performance**: Optimized for speed and efficiency.
-- **Proven in Production**: Battle-tested in large-scale, mission-critical systems.
+- **Eigen support**: Works with the popular linear algebra library [Eigen](https://eigen.tuxfamily.org/index.php?title=Main_Page).
+- **JIT Backend Support** *(optional)*: Infrastructure for pluggable JIT backends, enabling record-once/replay-many
+  workflows. See [samples/jit_tutorial](samples/jit_tutorial). A native code generation backend is available
+  separately under commercial license.
 
-## 💻 Example
+## Ecosystem
+
+| Repository | Description |
+|---|---|
+| [xad-py](https://github.com/auto-differentiation/xad-py) | Python bindings for XAD |
+| [QuantLibAAD](https://github.com/auto-differentiation/QuantLibAAD) | Full QuantLib integration — compute all Greeks at once, up to 3 orders of magnitude faster than bump-and-reval |
+| [QuantLib-Risks-Py](https://github.com/auto-differentiation/QuantLib-Risks-Py) | QuantLib risks from Python |
+| [xad-codegen](https://www.xcelerit.com/xad-enterprise-support) | Native code generation backend — maximum throughput (commercial) |
+| [AAD Training](https://www.xcelerit.com/solutions/training-aad) | Hands-on AAD training for quants and quant developers - delivered to dozens of tier 1 banks and financial services firms |
+
+## Example
 
 Calculate first-order derivatives of an arbitrary function with two inputs and one output using XAD in adjoint mode.
-
 ```c++
 Adouble x0 = 1.3;              // initialise inputs
-Adouble x1 = 5.2;  
+Adouble x1 = 5.2;
 tape.registerInput(x0);        // register independent variables
 tape.registerInput(x1);        // with the tape
 tape.newRecording();           // start recording derivatives
@@ -70,8 +73,9 @@ cout << "dy/dx0=" << derivative(x0) << "\n"
      << "dy/dx1=" << derivative(x1) << "\n";
 ```
 
-## 🚀 Getting Started
+## Getting Started
 
+Build XAD from source using CMake:
 ```bash
 git clone https://github.com/auto-differentiation/xad.git
 cd xad
@@ -82,26 +86,22 @@ make
 ```
 
 For more detailed guides,
-refer to our [**Installation Guide**](https://auto-differentiation.github.io/installation/)
+refer to our [**Installation Guide**](https://auto-differentiation.github.io/installation/cxx/)
 and explore [**Tutorials**](https://auto-differentiation.github.io/tutorials/).
 
-## 🤝 Contributing
+## Documentation
 
-Want to get involved? We welcome contributors from all backgrounds! Check out
-our [**Contributing Guide**](CONTRIBUTING.md) and join the conversation in our
-[**Discussions**](https://github.com/auto-differentiation/xad/discussions).
+Full documentation, including API reference and usage examples, is available at:
+[**https://auto-differentiation.github.io/**](https://auto-differentiation.github.io/)
 
-## 🐛 Found a Bug?
+## Contributing
 
-Please report any issues through our
-[**Issue Tracker**](https://github.com/auto-differentiation/xad/issues).
+Contributions are welcome. Please see the
+[**Contributing Guide**](CONTRIBUTING.md) for details, and feel free to start a
+discussion in our
+[**GitHub Discussions**](https://github.com/auto-differentiation/xad/discussions).
 
----
+## Found a Bug?
 
-## 📦 Related Projects
-
-- [XAD-Py](https://github.com/auto-differentiation/xad-py): XAD in Python.
-- [QuantLib-Risks](https://github.com/auto-differentiation/QuantLib-Risks-Cpp): Fast
-  risk evaluations in C++ and Python.
-
----
+Please report bugs and issues via the
+[**GitHub Issue Tracker**](https://github.com/auto-differentiation/xad/issues).

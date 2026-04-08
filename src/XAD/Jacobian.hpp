@@ -5,7 +5,7 @@
    This file is part of XAD, a comprehensive C++ library for
    automatic differentiation.
 
-   Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+   Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU Affero General Public License as published
@@ -39,22 +39,55 @@ template <typename T>
 std::vector<std::vector<T>> computeJacobian(
     const std::vector<AReal<T>> &vec,
     std::function<std::vector<AReal<T>>(std::vector<AReal<T>> &)> foo,
-    Tape<T> *tape = Tape<T>::getActive())
+    std::size_t codomain,
+    Tape<T> *tape)
 {
     auto v(vec);
-    std::vector<std::vector<T>> matrix(foo(v).size(), std::vector<T>(v.size(), 0.0));
-    computeJacobian(vec, foo, begin(matrix), end(matrix), tape);
+    codomain = (codomain == 0) ? foo(v).size() : codomain;
+    std::vector<std::vector<T>> matrix(codomain, std::vector<T>(v.size(), 0.0));
+    computeJacobian(vec, foo, begin(matrix), end(matrix), codomain, tape);
     return matrix;
+}
+
+// adj 2d vector !tape & !codomain
+template <typename T>
+std::vector<std::vector<T>> computeJacobian(
+    const std::vector<AReal<T>> &vec,
+    std::function<std::vector<AReal<T>>(std::vector<AReal<T>> &)> foo)
+{
+    return computeJacobian(vec, foo, 0U, Tape<T>::getActive());
+}
+
+// adj 2d vector tape & !codomain
+template <typename T>
+std::vector<std::vector<T>> computeJacobian(
+    const std::vector<AReal<T>> &vec,
+    std::function<std::vector<AReal<T>>(std::vector<AReal<T>> &)> foo,
+    Tape<T> *tape)
+{
+    return computeJacobian(vec, foo, 0U, tape);
+}
+
+// adj 2d vector !tape & codomain
+template <typename T>
+std::vector<std::vector<T>> computeJacobian(
+    const std::vector<AReal<T>> &vec,
+    std::function<std::vector<AReal<T>>(std::vector<AReal<T>> &)> foo,
+    std::size_t codomain)
+{
+    return computeJacobian(vec, foo, codomain, Tape<T>::getActive());
 }
 
 // adj iterator
 template <typename RowIterator, typename T>
 void computeJacobian(const std::vector<AReal<T>> &vec,
                      std::function<std::vector<AReal<T>>(std::vector<AReal<T>> &)> foo,
-                     RowIterator first, RowIterator last, Tape<T> *tape = Tape<T>::getActive())
+                     RowIterator first, RowIterator last,
+                     std::size_t codomain = 0U,
+                     Tape<T> *tape = Tape<T>::getActive())
 {
-    if (std::distance(first->cbegin(), first->cend()) != vec.size())
-        throw OutOfRange("Iterator not allocated enough space (domain)");
+    if (static_cast<std::size_t>(std::distance(first->cbegin(), first->cend())) != vec.size())
+        throw OutOfRange("Iterator allocated space doesn't equal codomain");
     static_assert(detail::has_begin<typename std::iterator_traits<RowIterator>::value_type>::value,
                   "RowIterator must dereference to a type that implements a begin() method");
     std::unique_ptr<Tape<T>> t;
@@ -69,19 +102,21 @@ void computeJacobian(const std::vector<AReal<T>> &vec,
     tape->registerInputs(v);
     tape->newRecording();
     auto y = foo(v);
-    unsigned int domain = static_cast<unsigned int>(vec.size()),
-                 codomain = static_cast<unsigned int>(y.size());
-    if (std::distance(first, last) != codomain)
-        throw OutOfRange("Iterator not allocated enough space (codomain)");
+    std::size_t domain = vec.size();
+    codomain = (codomain == 0) ? y.size() : codomain;
+    if (static_cast<std::size_t>(std::distance(first, last)) != codomain)
+        throw OutOfRange("Iterator allocated space doesn't equal codomain");
+    if (y.size() != codomain)
+        throw OutOfRange("Iterator allocated space doesn't equal codomain");
     tape->registerOutputs(y);
 
     auto row = first;
-    for (unsigned int i = 0; i < codomain; i++, row++)
+    for (std::size_t i = 0; i < codomain; i++, row++)
     {
         auto col = row->begin();
         derivative(y[i]) = 1.0;
         tape->computeAdjoints();
-        for (unsigned int j = 0; j < domain; j++, col++) *col = derivative(v[j]);
+        for (std::size_t j = 0; j < domain; j++, col++) *col = derivative(v[j]);
         tape->clearDerivatives();
     }
 }
@@ -90,11 +125,13 @@ void computeJacobian(const std::vector<AReal<T>> &vec,
 template <typename T>
 std::vector<std::vector<T>> computeJacobian(
     const std::vector<FReal<T>> &vec,
-    std::function<std::vector<FReal<T>>(std::vector<FReal<T>> &)> foo)
+    std::function<std::vector<FReal<T>>(std::vector<FReal<T>> &)> foo,
+    std::size_t codomain = 0U)
 {
     auto v(vec);
-    std::vector<std::vector<T>> matrix(foo(v).size(), std::vector<T>(v.size(), 0.0));
-    computeJacobian(vec, foo, begin(matrix), end(matrix));
+    codomain = (codomain == 0) ? foo(v).size() : codomain;
+    std::vector<std::vector<T>> matrix(codomain, std::vector<T>(v.size(), 0.0));
+    computeJacobian(vec, foo, begin(matrix), end(matrix), codomain);
     return matrix;
 }
 
@@ -102,27 +139,32 @@ std::vector<std::vector<T>> computeJacobian(
 template <typename RowIterator, typename T>
 void computeJacobian(const std::vector<FReal<T>> &vec,
                      std::function<std::vector<FReal<T>>(std::vector<FReal<T>> &)> foo,
-                     RowIterator first, RowIterator last)
+                     RowIterator first, RowIterator last,
+                     std::size_t codomain = 0U)
 {
-    if (std::distance(first->cbegin(), first->cend()) != vec.size())
-        throw OutOfRange("Iterator not allocated enough space (domain)");
+    if (static_cast<std::size_t>(std::distance(first->cbegin(), first->cend())) != vec.size())
+        throw OutOfRange("Iterator allocated space doesn't equal codomain");
     static_assert(detail::has_begin<typename std::iterator_traits<RowIterator>::value_type>::value,
                   "RowIterator must dereference to a type that implements a begin() method");
 
     auto v(vec);
-    unsigned int domain = static_cast<unsigned int>(vec.size()),
-                 codomain = static_cast<unsigned int>(foo(v).size());
+    std::size_t domain = vec.size();
+    codomain = (codomain == 0) ? foo(v).size() : codomain;
 
-    if (std::distance(first, last) != codomain)
-        throw OutOfRange("Iterator not allocated enough space (codomain)");
+    if (static_cast<std::size_t>(std::distance(first, last)) != codomain)
+        throw OutOfRange("Iterator allocated space doesn't equal codomain");
 
     auto row = first;
-    for (unsigned int i = 0; i < domain; i++)
+    for (std::size_t i = 0; i < domain; i++)
     {
         derivative(v[i]) = 1.0;
         auto y = foo(v);
+        if (i == 0) { // only check once; codomain won't change on further iterations
+            if (y.size() != codomain)
+                throw OutOfRange("Iterator allocated space doesn't equal codomain");
+        }
         derivative(v[i]) = 0.0;
-        for (unsigned int j = 0; j < codomain; j++)
+        for (std::size_t j = 0; j < codomain; j++)
         {
             row = first;
             std::advance(row, j);

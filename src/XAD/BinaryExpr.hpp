@@ -5,7 +5,7 @@
    This file is part of XAD, a comprehensive C++ library for
    automatic differentiation.
 
-   Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+   Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU Affero General Public License as published
@@ -24,8 +24,12 @@
 
 #pragma once
 
+#include <XAD/Config.hpp>
 #include <XAD/BinaryDerivativeImpl.hpp>
 #include <XAD/Expression.hpp>
+#ifdef XAD_ENABLE_JIT
+#include <XAD/JITExprTraits.hpp>
+#endif
 #include <XAD/Macros.hpp>
 #include <XAD/Traits.hpp>
 #include <type_traits>
@@ -33,8 +37,9 @@
 namespace xad
 {
 
-template <class Scalar, class Op, class Expr1, class Expr2>
-struct BinaryExpr : Expression<Scalar, BinaryExpr<Scalar, Op, Expr1, Expr2> >
+template <class Scalar, class Op, class Expr1, class Expr2, class DerivativeType = Scalar>
+struct BinaryExpr
+    : Expression<Scalar, BinaryExpr<Scalar, Op, Expr1, Expr2, DerivativeType>, DerivativeType>
 {
     typedef detail::BinaryDerivativeImpl<OperatorTraits<Op>::useResultBasedDerivatives == 1>
         der_impl;
@@ -44,52 +49,46 @@ struct BinaryExpr : Expression<Scalar, BinaryExpr<Scalar, Op, Expr1, Expr2> >
     }
     XAD_INLINE Scalar value() const { return v_; }
 
-    template <class Tape>
-    XAD_INLINE void calc_derivatives(Tape& s, const Scalar& mul) const
+    template <class Tape, int Size>
+    XAD_INLINE void calc_derivatives(DerivInfo<Tape, Size>& info, Tape& s, const Scalar& mul) const
     {
         using xad::value;
-        a_.calc_derivatives(s,
-                            mul * der_impl::template derivative_a(op_, value(a_), value(b_), v_));
-        b_.calc_derivatives(s,
-                            mul * der_impl::template derivative_b(op_, value(a_), value(b_), v_));
+        a_.calc_derivatives(info, s,
+                            mul * der_impl::template derivative_a<>(op_, value(a_), value(b_), v_));
+        b_.calc_derivatives(info, s,
+                            mul * der_impl::template derivative_b<>(op_, value(a_), value(b_), v_));
     }
-    template <class Tape>
-    XAD_INLINE void calc_derivatives(Tape& s) const
+    template <class Tape, int Size>
+    XAD_INLINE void calc_derivatives(DerivInfo<Tape, Size>& info, Tape& s) const
     {
         using xad::value;
-        a_.calc_derivatives(s, der_impl::template derivative_a(op_, value(a_), value(b_), v_));
-        b_.calc_derivatives(s, der_impl::template derivative_b(op_, value(a_), value(b_), v_));
-    }
-
-    template <typename Slot>
-    XAD_INLINE void calc_derivatives(Slot* slot, Scalar* muls, int& n, const Scalar& mul) const
-    {
-        using xad::value;
-        a_.calc_derivatives(slot, muls, n,
-                            mul * der_impl::template derivative_a(op_, value(a_), value(b_), v_));
-        b_.calc_derivatives(slot, muls, n,
-                            mul * der_impl::template derivative_b(op_, value(a_), value(b_), v_));
+        a_.calc_derivatives(info, s,
+                            der_impl::template derivative_a<>(op_, value(a_), value(b_), v_));
+        b_.calc_derivatives(info, s,
+                            der_impl::template derivative_b<>(op_, value(a_), value(b_), v_));
     }
 
-    template <typename It1, typename It2>
-    XAD_INLINE void calc_derivatives(It1& sit, It2& mit, const Scalar& mul) const
-    {
-        using xad::value;
-        a_.calc_derivatives(sit, mit,
-                            mul * der_impl::template derivative_a(op_, value(a_), value(b_), v_));
-        b_.calc_derivatives(sit, mit,
-                            mul * der_impl::template derivative_b(op_, value(a_), value(b_), v_));
-    }
-
-    XAD_INLINE Scalar derivative() const
+    XAD_INLINE DerivativeType derivative() const
     {
         using xad::derivative;
         using xad::value;
-        return der_impl::template derivative_a(op_, value(a_), value(b_), v_) * derivative(a_) +
-               der_impl::template derivative_b(op_, value(a_), value(b_), v_) * derivative(b_);
+        return der_impl::template derivative_a<>(op_, value(a_), value(b_), v_) * derivative(a_) +
+               der_impl::template derivative_b<>(op_, value(a_), value(b_), v_) * derivative(b_);
     }
 
     XAD_INLINE bool shouldRecord() const { return a_.shouldRecord() || b_.shouldRecord(); }
+
+#ifdef XAD_ENABLE_JIT
+    uint32_t recordJIT(JITGraph& graph) const
+    {
+        static_assert(static_cast<uint16_t>(JITOpCodeFor<Op>::value) != 0xFFFF,
+                      "JIT opcode mapping missing for binary operator");
+        uint32_t slotA = a_.recordJIT(graph);
+        uint32_t slotB = b_.recordJIT(graph);
+        constexpr JITOpCode opcode = JITOpCodeFor<Op>::value;
+        return graph.addNode(opcode, slotA, slotB);
+    }
+#endif
 
   private:
     Expr1 a_;
@@ -98,8 +97,8 @@ struct BinaryExpr : Expression<Scalar, BinaryExpr<Scalar, Op, Expr1, Expr2> >
     Scalar v_;
 };
 
-template <class Scalar, class Op, class Expr1, class Expr2>
-struct ExprTraits<BinaryExpr<Scalar, Op, Expr1, Expr2> >
+template <class Scalar, class Op, class Expr1, class Expr2, class DerivativeType>
+struct ExprTraits<BinaryExpr<Scalar, Op, Expr1, Expr2, DerivativeType>>
 {
     static const bool isExpr = true;
     static const int numVariables =
@@ -109,6 +108,8 @@ struct ExprTraits<BinaryExpr<Scalar, Op, Expr1, Expr2> >
     static const bool isLiteral = false;
     static const Direction direction =
         ExprTraits<typename ExprTraits<Expr1>::value_type>::direction;
+    static const std::size_t vector_size =
+        ExprTraits<typename ExprTraits<Expr1>::value_type>::vector_size;
 
     typedef typename ExprTraits<Scalar>::nested_type nested_type;
     typedef typename ExprTraits<Expr1>::value_type value_type;

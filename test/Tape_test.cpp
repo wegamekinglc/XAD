@@ -5,7 +5,7 @@
    This file is part of XAD, a comprehensive C++ library for
    automatic differentiation.
 
-   Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+   Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU Affero General Public License as published
@@ -202,6 +202,29 @@ TEST(Tape, canReuseSlots)
 }
 #endif
 
+TEST(Tape, reusableSlotsMethodsAlwaysCallable)
+{
+    // Test that getNumReusableSlotSections() and getNumReusableSlots() are
+    // callable regardless of XAD_TAPE_REUSE_SLOTS being defined.
+    // When XAD_TAPE_REUSE_SLOTS is NOT defined, they return 1 and 0 respectively.
+    // When XAD_TAPE_REUSE_SLOTS IS defined, they return actual values.
+    xad::Tape<double> s;
+
+    // These methods should always be callable
+    auto sections = s.getNumReusableSlotSections();
+    auto slots = s.getNumReusableSlots();
+
+#ifdef XAD_TAPE_REUSE_SLOTS
+    // With slot reuse enabled, initially no reusable slots
+    EXPECT_EQ(0U, sections);
+    EXPECT_EQ(0U, slots);
+#else
+    // Without slot reuse, returns fixed values
+    EXPECT_EQ(1U, sections);
+    EXPECT_EQ(0U, slots);
+#endif
+}
+
 TEST(Tape, canDeriveStatements)
 {
     xad::Tape<double> s;
@@ -220,19 +243,23 @@ TEST(Tape, canDeriveStatements)
     s.newRecording();
     // auto z = x1*x1 + std::sin(x1);
     auto zs = s.registerVariable();
-    s.pushRhs(std::cos(x1), x1s);
-    s.pushRhs(x2, x1s);
-    s.pushRhs(x1, x2s);
+    auto muls = {std::cos(x1), x2, x1};
+    auto slots = {x1s, x1s, x2s};
+    s.pushAll(muls.begin(), slots.begin(), 3);
     s.pushLhs(zs);
 
     EXPECT_EQ(3U, s.getNumVariables());
     EXPECT_EQ(3U, s.getNumOperations());
     EXPECT_EQ(1U, s.getNumStatements());
 
-    // set the derivative for output
-    s.setDerivative(zs, 1.0);
+    // set the derivative for output (both from rvalue and lvalue)
+    s.setDerivative(zs, 1.5);
     EXPECT_DOUBLE_EQ(0.0, s.getDerivative(x1s));
     EXPECT_DOUBLE_EQ(0.0, s.getDerivative(x2s));
+    EXPECT_DOUBLE_EQ(1.5, s.getDerivative(zs));
+
+    auto outDerive = 1.0;
+    s.setDerivative(zs, outDerive);
     EXPECT_DOUBLE_EQ(1.0, s.getDerivative(zs));
 
     // s.printStatus();
@@ -257,9 +284,9 @@ TEST(Tape, canRestartRecording)
 
     s.newRecording();
     auto zs = s.registerVariable();
-    s.pushRhs(std::cos(x1), x1s);
-    s.pushRhs(x2, x1s);
-    s.pushRhs(x1, x2s);
+    auto muls = {std::cos(x1), x2, x1};
+    auto slots = {x1s, x1s, x2s};
+    s.pushAll(muls.begin(), slots.begin(), 3);
     s.pushLhs(zs);
     s.setDerivative(zs, 1.0);
     // compute the other derivatives (adjoints)
@@ -281,9 +308,9 @@ TEST(Tape, canRestartRecording)
 
     // now putting y = exp(x1) + x1 / x2;
     auto ys = s.registerVariable();
-    s.pushRhs(std::exp(x1), x1s);
-    s.pushRhs(1.0 / x2, x1s);
-    s.pushRhs(-x1 / (x2 * x2), x2s);
+    auto muls2 = {std::exp(x1), 1.0 / x2, -x1 / (x2 * x2)};
+    auto slots2 = {x1s, x1s, x2s};
+    s.pushAll(muls2.begin(), slots2.begin(), 3);
     s.pushLhs(ys);
     s.setDerivative(ys, 1.0);
     s.computeAdjoints();
@@ -309,7 +336,8 @@ TEST(Tape, canPushCombined)
     auto zs = s.registerVariable();
     std::array<double, 3> mul = {{std::cos(x1), x2, x1}};
     std::array<xad::Tape<double>::slot_type, 3> sl = {{x1s, x1s, x2s}};
-    s.pushAll(zs, mul.data(), sl.data(), 3);
+    s.pushAll(mul.data(), sl.data(), 3);
+    s.pushLhs(zs);
     s.setDerivative(zs, 1.0);
     s.computeAdjoints();
     EXPECT_DOUBLE_EQ(1.0, s.getDerivative(x1s));

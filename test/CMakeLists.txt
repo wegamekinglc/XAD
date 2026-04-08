@@ -1,11 +1,11 @@
 ##############################################################################
-#   
+#
 #  Cmake file for unit tests
 #
 #  This file is part of XAD, a comprehensive C++ library for
 #  automatic differentiation.
 #
-#  Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+#  Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 #
 #  This program is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU Affero General Public License as published
@@ -19,10 +19,11 @@
 #
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#   
+#
 ##############################################################################
 
-set(testfiles 
+set(testfiles
+    Vec_test.cpp
     TapeContainer_test.cpp
     ChunkContainer_test.cpp
     TestHelpers.hpp
@@ -41,14 +42,35 @@ set(testfiles
     ExpressionMeta_test.cpp
     Tbr_test.cpp
     StreamOps_test.cpp
-    StdCompatibility_test.cpp 
+    StdCompatibility_test.cpp
     ReusableRange_test.cpp
     PartialRollback_test.cpp
     Hessian_test.cpp
     Jacobian_test.cpp
     TypeTraits_test.cpp
+    OperationsContainer_test.cpp
+    FRealDirect_test.cpp
+    FReal_test.cpp
+    ARealDirect_test.cpp
+    DirectModeBenchmark.cpp
 )
-  
+
+if (XAD_ENABLE_EIGEN_TESTS)
+    list(APPEND testfiles Eigen_test.cpp)
+endif()
+
+if (XAD_ENABLE_CODEGEN)
+    list(APPEND testfiles
+        JITCompiler_test.cpp
+        JITExprTraits_test.cpp
+        JITGraph_test.cpp
+        JITGraphInterpreter_test.cpp
+        JITABool_test.cpp
+        JITExpressionMath_test.cpp
+    )
+endif()
+
+
 if (CMAKE_COMPILER_IS_GNUCC)
     set_source_files_properties(ExpressionsConversion_test.cpp
         COMPILE_FLAGS "-Wno-conversion")

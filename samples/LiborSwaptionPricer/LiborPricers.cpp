@@ -8,7 +8,7 @@
    The code is an adapted version of Prof. Mike Giles, available here:
    https://people.maths.ox.ac.uk/~gilesm/codes/libor_AD/testlinadj.cpp
 
-   Copyright (C) 2010-2024 Xcelerit Computing Ltd.
+   Copyright (C) 2010-2026 Xcelerit Computing Ltd.
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU Affero General Public License as published
@@ -62,11 +62,12 @@ typedef xad::adj<double> mode;
 typedef mode::tape_type tape_type;
 typedef mode::active_type AD;
 
-tape_type tape;
-
 Results pricePortfolioAD(const SwaptionPortfolio& portfolio, const MarketParameters& market,
                          int numPaths, unsigned long long seed = 12354)
 {
+    // Create local tape (avoids static initialization order issues)
+    tape_type tape;
+
     std::mt19937 gen(seed);
     std::normal_distribution<double> dist(0., 1.);
     std::vector<double> samples(market.lambda.size() / 2);
