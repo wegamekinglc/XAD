@@ -23,7 +23,7 @@
         "XAD_ENABLE_TESTS": "off",
         "XAD_STATIC_MSVC_RUNTIME": "on",
         "XAD_USE_STRONG_INLINE": "on",
-        "XAD_ENABLE_JIT": "off"
+        "XAD_ENABLE_CODEGEN": "off"
       }
     },
     {
@@ -35,7 +35,7 @@
         "XAD_ENABLE_TESTS": "off",
         "XAD_STATIC_MSVC_RUNTIME": "on",
         "XAD_USE_STRONG_INLINE": "on",
-        "XAD_ENABLE_JIT": "off"
+        "XAD_ENABLE_CODEGEN": "off"
       }
     },
     {
@@ -45,7 +45,7 @@
         "CMAKE_BUILD_TYPE": "Release",
         "XAD_ENABLE_TESTS": "off",
         "XAD_USE_STRONG_INLINE": "on",
-        "XAD_ENABLE_JIT": "off"
+        "XAD_ENABLE_CODEGEN": "off"
       }
     },
     {
@@ -55,7 +55,7 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "XAD_ENABLE_TESTS": "off",
         "XAD_USE_STRONG_INLINE": "on",
-        "XAD_ENABLE_JIT": "off"
+        "XAD_ENABLE_CODEGEN": "off"
       }
     }
   ]
